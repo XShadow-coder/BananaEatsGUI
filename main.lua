@@ -74,7 +74,7 @@ local COLORS = {
 }
 
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "BananaEatsGUI"
+screenGui.Name = "BananaFarmGUI"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = player:WaitForChild("PlayerGui")
 
@@ -486,4 +486,126 @@ task.spawn(function()
                 if plr.Character then
                     local adorn = findAdornee(plr.Character)
                     if adorn then
-                        local team = plr.T
+                        local team = plr.Team and plr.Team.Name or ""
+                        if team == RUNNER_TEAM then
+                            addEspForAdornee(adorn, COLORS.blue, plr.Name)
+                            seen[adorn] = true
+                        elseif team == BANANA_TEAM then
+                            addEspForAdornee(adorn, COLORS.banana, plr.Name)
+                            seen[adorn] = true
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Puzzles (workspace.GameKeeper.Puzzles)
+        if Toggles.EspPuzzles then
+            local puzzleFolder = Workspace:FindFirstChild("GameKeeper") and Workspace:FindFirstChild("Puzzles") or (Workspace:FindFirstChild("GameKeeper") and Workspace.GameKeeper:FindFirstChild("Puzzles"))
+            if not puzzleFolder then
+                puzzleFolder = Workspace:FindFirstChild("GameKeeper") and Workspace.GameKeeper:FindFirstChild("Map") and Workspace.GameKeeper.Map:FindFirstChild("Puzzles")
+            end
+            if puzzleFolder then
+                for _, obj in ipairs(puzzleFolder:GetChildren()) do
+                    local adornee = findAdornee(obj)
+                    if adornee then
+                        addEspForAdornee(adornee, COLORS.puzzle, tostring(obj.Name))
+                        seen[adornee] = true
+                    end
+                end
+            end
+        end
+
+        -- cleanup entries not seen
+        for adornee, _ in pairs(espCache) do
+            if not seen[adornee] then
+                clearEspEntry(adornee)
+            end
+        end
+    end
+end)
+
+-- cleanup on character remove
+player.CharacterRemoving:Connect(function()
+    for k, _ in pairs(espCache) do clearEspEntry(k) end
+    espCache = {}
+    if myPlatform then
+        myPlatform:Destroy()
+        myPlatform = nil
+    end
+end)
+
+--========================================================
+-- CLEAN UP FUNCTION (resets everything and tries to reduce lag)
+-- Behavior:
+--  - if SafePlace active, teleport player to savedPosition BEFORE reset
+--  - when lobby entered, SafePlace is removed without teleport
+--========================================================
+
+local function doCleanUp()
+    -- If SafePlace active and we have a savedPosition -> teleport back first
+    if Toggles.SafePlace and savedPosition and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        pcall(function()
+            local hrp = player.Character.HumanoidRootPart
+            hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
+            hrp.CFrame = CFrame.new(savedPosition)
+        end)
+    end
+
+    -- 1) disable all toggles
+    for k,_ in pairs(Toggles) do Toggles[k] = false end
+
+    -- 2) stop magnet: loop checks Toggles.AutoCollect so it will exit
+    task.spawn(function()
+        task.wait(0.3)
+        magnetTask = nil
+    end)
+
+    -- 3) remove platform (already teleported back if we did above)
+    if myPlatform then
+        pcall(function() myPlatform:Destroy() end)
+        myPlatform = nil
+    end
+
+    -- 4) reset savedPosition / escape state / round tick
+    savedPosition = nil
+    isEscaping = false
+    roundStartTick = 0
+
+    -- 5) clear all ESP artifacts
+    for adornee, _ in pairs(espCache) do
+        clearEspEntry(adornee)
+    end
+    espCache = {}
+
+    -- 6) update UI buttons text to Off (minimal)
+    local function setBtnOff(btn, label)
+        if btn and btn:IsA("TextButton") then
+            btn.Text = label .. ": Off"
+        end
+    end
+    setBtnOff(btnAutoCollect, "Auto Collect Coins")
+    setBtnOff(btnSafePlace, "Safe Place")
+    setBtnOff(btnAutoEscape, "Auto Escape (<60s)")
+    setBtnOff(btnEspTokens, "Esp Tokens")
+    setBtnOff(btnEspEntities, "Esp Entities")
+    setBtnOff(btnEspPuzzles, "Esp Puzzles")
+
+    -- 7) small garbage collection to reduce memory
+    pcall(function() collectgarbage("collect") end)
+end
+
+btnClean.MouseButton1Click:Connect(function()
+    doCleanUp()
+end)
+
+-- Bind callbacks (ensure these are the active handlers)
+onAutoCollectChanged = function(state)
+    if state then startMagnet() end
+    -- when state==false the magnet loop will stop because it checks Toggles.AutoCollect
+end
+
+-- Show GUI
+screenGui.Enabled = true
+
+-- End of script
