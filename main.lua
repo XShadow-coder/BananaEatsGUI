@@ -1,5 +1,9 @@
 --========================================================
--- BANANA FARM V8 (AutoEscape spam 3s inside door) - Aggiornato
+-- BANANA FARM V9
+-- Behavior:
+--  - se vai in Lobby: la piattaforma SafePlace viene distrutta (no teleport back)
+--  - se torni in Runners e SafePlace è On: la piattaforma viene ricreata e spam-teleport per 1s
+--  - in Lobby le feature principali (AutoCollect, AutoEscape, ESP) non vengono eseguite
 --========================================================
 
 -- Services
@@ -15,7 +19,7 @@ local RUNNER_TEAM = "Runners"
 local BANANA_TEAM = "Banana"
 local SAFE_HEIGHT = 500
 
--- Attempt to fetch GameClock safely
+-- GameClock (safe attempt)
 local GameClock
 pcall(function()
     if Workspace:FindFirstChild("GameProperties") then
@@ -51,7 +55,15 @@ player.Idled:Connect(function()
     VirtualUser:ClickButton2(Vector2.new())
 end)
 
--- UTIL
+-- UTIL helpers
+local function isInLobby()
+    return player.Team and player.Team.Name == "Lobby"
+end
+
+local function isRunner()
+    return player.Team and player.Team.Name == RUNNER_TEAM
+end
+
 local function getAdorneeFromObject(obj)
     if not obj then return nil end
     if obj:IsA("BasePart") then return obj end
@@ -62,7 +74,7 @@ local function getAdorneeFromObject(obj)
     return nil
 end
 
--- GUI (stile precedente, colori minimal)
+-- GUI minimal (come richiesto)
 local COLORS = {
     darkBG = Color3.fromRGB(20,20,20),
     strokeGray = Color3.fromRGB(70,70,70),
@@ -95,7 +107,7 @@ local title = Instance.new("TextLabel", mainFrame)
 title.Size = UDim2.new(1,-20,0,28)
 title.Position = UDim2.new(0,10,0,6)
 title.BackgroundTransparency = 1
-title.Text = "BANANA FARM V8"
+title.Text = "BANANA FARM V9"
 title.Font = Enum.Font.GothamBold
 title.TextColor3 = COLORS.white
 title.TextSize = 17
@@ -107,7 +119,7 @@ separator.Position = UDim2.new(0,10,0,34)
 separator.BackgroundColor3 = COLORS.strokeGray
 separator.BorderSizePixel = 0
 
--- CreateToggle that writes to Toggles[key] and calls onChanged
+-- Toggle creator
 local function CreateToggle(name, posY, key, onChanged)
     Toggles[key] = Toggles[key] or false
     local btn = Instance.new("TextButton", mainFrame)
@@ -129,11 +141,11 @@ local function CreateToggle(name, posY, key, onChanged)
     return btn
 end
 
--- Forward declarations for callbacks
+-- Forward callbacks
 local function onAutoCollectChanged(state) end
 local function onSafePlaceChanged(state) end
 
--- Buttons positions
+-- Buttons
 local y = 60
 local spacing = 40
 local btnAutoCollect = CreateToggle("Auto Collect Coins", y, "AutoCollect", function(s) onAutoCollectChanged(s) end); y = y + spacing
@@ -143,30 +155,28 @@ local btnEspTokens   = CreateToggle("Esp Tokens", y, "EspTokens", nil); y = y + 
 local btnEspEntities = CreateToggle("Esp Entities", y, "EspEntities", nil); y = y + spacing
 local btnEspPuzzles  = CreateToggle("Esp Puzzles", y, "EspPuzzles", nil); y = y + spacing
 
--- CLEAN UP BUTTON (minimal style, fixed at bottom)
+-- Clean button at bottom
 local btnClean = Instance.new("TextButton", mainFrame)
 btnClean.Size = UDim2.new(0,260,0,36)
-btnClean.Position = UDim2.new(0,10,1,-46) -- bottom with 10px margin
-btnClean.BackgroundColor3 = Color3.fromRGB(90,90,90) -- minimal accent
+btnClean.Position = UDim2.new(0,10,1,-46) -- bottom
+btnClean.BackgroundColor3 = Color3.fromRGB(90,90,90)
 btnClean.Font = Enum.Font.GothamBold
 btnClean.TextColor3 = COLORS.white
 btnClean.TextSize = 15
 btnClean.Text = "CLEAN UP (RESET)"
 Instance.new("UICorner", btnClean).CornerRadius = UDim.new(0,8)
 
---========================================================
--- SAFE PLACE: spam teleport 1s then keep platform
---========================================================
-
+-- SAFE PLACE: create/destroy logic
 local function enableSafePlace()
+    if isInLobby() then return end -- non creare in lobby
     local char = player.Character or player.CharacterAdded:Wait()
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    -- save current position
+    -- salva posizione corrente (usata se user fa clean up)
     savedPosition = hrp.Position
 
-    -- create platform if not exists
+    -- crea piattaforma sopra la mappa
     if not myPlatform then
         myPlatform = Instance.new("Part")
         myPlatform.Name = "BF_SafePlatform"
@@ -178,13 +188,13 @@ local function enableSafePlace()
         myPlatform.Parent = Workspace
     end
 
-    -- spam teleport for 1 second (0.05s step)
+    -- spam teletrasporto per 1 secondo
     local spamTime = 1.0
     local interval = 0.05
     local iterations = math.floor(spamTime / interval)
     task.spawn(function()
         for i = 1, iterations do
-            if not Toggles.SafePlace then break end
+            if not Toggles.SafePlace or isInLobby() then break end
             if not player.Character then break end
             local hrp2 = player.Character:FindFirstChild("HumanoidRootPart")
             if hrp2 and myPlatform then
@@ -196,7 +206,7 @@ local function enableSafePlace()
             task.wait(interval)
         end
         -- final adjustment
-        if Toggles.SafePlace and player.Character and myPlatform then
+        if Toggles.SafePlace and not isInLobby() and player.Character and myPlatform then
             local hrp3 = player.Character:FindFirstChild("HumanoidRootPart")
             if hrp3 then
                 pcall(function()
@@ -208,7 +218,7 @@ local function enableSafePlace()
     end)
 end
 
--- normal disable (teleport back to savedPosition)
+-- normal disable: teleport back to savedPosition
 local function disableSafePlace()
     local char = player.Character
     if char and savedPosition then
@@ -229,52 +239,73 @@ local function disableSafePlace()
     savedPosition = nil
 end
 
--- disable without teleport (for Lobby case)
+-- disable without teleport (for Lobby)
 local function disableSafePlaceNoTeleport()
     if myPlatform then
         myPlatform:Destroy()
         myPlatform = nil
     end
+    -- clear savedPosition so we won't accidentally teleport back later
     savedPosition = nil
 end
 
 -- SafePlace toggle callback
 onSafePlaceChanged = function(state)
     if state then
-        enableSafePlace()
+        -- create only if not in Lobby
+        if not isInLobby() then
+            enableSafePlace()
+        end
     else
         disableSafePlace()
     end
 end
 
--- Re-enable safe place after respawn if needed
+-- When character respawns and SafePlace is On and we are Runner -> recreate
 player.CharacterAdded:Connect(function()
-    if Toggles.SafePlace then
-        task.wait(0.8)
+    task.wait(0.8)
+    if Toggles.SafePlace and isRunner() then
         enableSafePlace()
     end
 end)
 
--- If player team changes to Lobby -> disable platform without teleport
+-- TEAM CHANGE HANDLER:
+-- - if enter Lobby: destroy platform without teleport (disable visual only)
+-- - if enter Runners and SafePlace On: create platform above current pos
 player:GetPropertyChangedSignal("Team"):Connect(function()
     local t = player.Team
     if t and t.Name == "Lobby" then
+        -- remove platform without teleport
         if myPlatform then
             disableSafePlaceNoTeleport()
         end
-        Toggles.SafePlace = false
-        if btnSafePlace and btnSafePlace:IsA("TextButton") then
-            btnSafePlace.Text = "Safe Place: Off"
+        -- do NOT flip the toggle: user choice is preserved
+        -- stop effects: loops check isInLobby() and will skip while in lobby
+        -- clear ESP artifacts to avoid showing things in lobby
+        for k, _ in pairs(espCache) do
+            if espCache[k] then
+                if espCache[k].hl and espCache[k].hl.Parent then pcall(function() espCache[k].hl:Destroy() end) end
+                if espCache[k].bill and espCache[k].bill.Parent then pcall(function() espCache[k].bill:Destroy() end) end
+            end
+            espCache[k] = nil
+        end
+    elseif t and t.Name == RUNNER_TEAM then
+        -- returning to Runner: if SafePlace toggle is On, recreate platform
+        if Toggles.SafePlace then
+            enableSafePlace()
         end
     end
 end)
 
---========================================================
--- MAGNET: teletrasporto diretto ogni 0.5s
---========================================================
-
+-- MAGNET: teletrasporto diretto ogni 0.5s, but skip while in Lobby
 local function magnetLoop()
     while Toggles.AutoCollect do
+        if isInLobby() then
+            -- don't collect in lobby; wait and continue
+            task.wait(0.5)
+            continue
+        end
+
         local char = player.Character
         if char then
             local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -285,7 +316,7 @@ local function magnetLoop()
                 if tokensFolder then
                     pcall(function()
                         for _, token in ipairs(tokensFolder:GetChildren()) do
-                            if not Toggles.AutoCollect then break end
+                            if not Toggles.AutoCollect or isInLobby() then break end
                             local part = getAdorneeFromObject(token)
                             if part and part.Name == MONEY_NAME then
                                 part.CanCollide = false
@@ -306,30 +337,15 @@ local function startMagnet()
     magnetTask = task.spawn(magnetLoop)
 end
 
--- AutoCollect toggle callback
 onAutoCollectChanged = function(state)
     if state then
         startMagnet()
     else
-        -- toggle off: loop will stop because it checks Toggles.AutoCollect
+        -- loop will stop naturally
     end
 end
 
--- Ensure initial magnet if toggled on (default false)
-if Toggles.AutoCollect then startMagnet() end
-
---========================================================
--- AUTO ESCAPE (spam-teleport INSIDE exit for 3s)
--- Conditions:
---  - Toggles.AutoEscape == true
---  - player.Team == Runners
---  - GameClock.Value <= 60
---  - waited autoEscapeDelay after round start
--- Behavior:
---  - when conditions met and not already escaping, spam-teleport player to exit's CFrame (no +y) for 3s (0.05s steps)
---  - respect toggle/team during spam (will abort if toggle turned off or team changes)
---========================================================
-
+-- AUTO ESCAPE: only when Runner and not in Lobby; spam-inside for 3s
 if GameClock then
     GameClock:GetPropertyChangedSignal("Value"):Connect(function()
         if GameClock.Value > 100 then
@@ -341,9 +357,10 @@ end
 
 task.spawn(function()
     while true do
-        task.wait(0.2) -- light check interval
+        task.wait(0.2)
         if not Toggles.AutoEscape then continue end
-        if not player.Team or player.Team.Name ~= RUNNER_TEAM then continue end
+        if isInLobby() then continue end
+        if not isRunner() then continue end
         if not GameClock then continue end
         if GameClock.Value > 60 then
             isEscaping = false
@@ -352,7 +369,6 @@ task.spawn(function()
         if roundStartTick ~= 0 and tick() - roundStartTick < autoEscapeDelay then continue end
         if isEscaping then continue end
 
-        -- find exit part
         local exits = Workspace:FindFirstChild("GameKeeper") and Workspace.GameKeeper:FindFirstChild("Exits")
         if not exits then continue end
 
@@ -367,131 +383,130 @@ task.spawn(function()
         if not exitPart then continue end
         if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then continue end
 
-        -- spam-teleport inside for 3 seconds
+        -- spam inside for 3 seconds
         isEscaping = true
         local spamDuration = 3.0
         local spamInterval = 0.05
-        local spamIterations = math.floor(spamDuration / spamInterval)
-        for i = 1, spamIterations do
-            -- abort conditions: toggle turned off or team changed or no character
-            if not Toggles.AutoEscape then break end
-            if not player.Team or player.Team.Name ~= RUNNER_TEAM then break end
-            if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then break end
-
+        local iterations = math.floor(spamDuration / spamInterval)
+        for i = 1, iterations do
+            if not Toggles.AutoEscape or isInLobby() or not isRunner() then
+                isEscaping = false
+                break
+            end
+            if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+                isEscaping = false
+                break
+            end
             pcall(function()
                 local hrp = player.Character.HumanoidRootPart
-                -- teleport to exit's CFrame (no vertical offset) -- places you 'inside' the door area
                 hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
+                -- teleport "inside" exitPart (no additional y offset)
                 hrp.CFrame = exitPart.CFrame
             end)
-
             task.wait(spamInterval)
         end
-
-        -- leave isEscaping true until the situation resets (so we don't re-trigger immediately)
-        -- if we aborted early due to toggle/team change, clear isEscaping to allow future triggers
-        if not Toggles.AutoEscape or not player.Team or player.Team.Name ~= RUNNER_TEAM then
-            isEscaping = false
-        else
-            -- keep flagged true so we don't spam again this phase
-            isEscaping = true
-        end
+        -- leave isEscaping true until situation resets (GameClock change) to avoid re-triggering immediately
     end
 end)
 
---========================================================
--- ESP (optimized 0.5s)
---========================================================
-
-local function clearEspEntry(key)
-    local e = espCache[key]
-    if not e then return end
-    if e.hl and e.hl.Parent then e.hl:Destroy() end
-    if e.bill and e.bill.Parent then e.bill:Destroy() end
-    espCache[key] = nil
-end
-
-local function createBillboard(adornee, text, color)
-    local bill = Instance.new("BillboardGui")
-    bill.Name = "BF_NameTag"
-    bill.Adornee = adornee
-    bill.Size = UDim2.new(0,160,0,28)
-    bill.StudsOffset = Vector3.new(0,3,0)
-    bill.AlwaysOnTop = true
-
-    local lbl = Instance.new("TextLabel", bill)
-    lbl.Size = UDim2.new(1,0,1,0)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = text
-    lbl.Font = Enum.Font.GothamBold
-    lbl.TextColor3 = color
-    lbl.TextScaled = true
-
-    bill.Parent = workspace
-    return bill
-end
-
-local function addEspForAdornee(adornee, color, nameText)
-    if not adornee then return end
-    if espCache[adornee] then return end
-
-    local hl = Instance.new("Highlight")
-    hl.Name = "BF_Highlight"
-    hl.FillColor = color
-    hl.OutlineColor = Color3.new(0,0,0)
-    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-
-    if adornee.Parent and adornee.Parent:IsA("Model") then
-        hl.Parent = adornee.Parent
-    else
-        hl.Parent = adornee
+-- ESP: skip while in Lobby; if entering Lobby clear ESP
+local function clearAllEsp()
+    for adornee, entry in pairs(espCache) do
+        if entry then
+            pcall(function()
+                if entry.hl and entry.hl.Parent then entry.hl:Destroy() end
+                if entry.bill and entry.bill.Parent then entry.bill:Destroy() end
+            end)
+        end
+        espCache[adornee] = nil
     end
-
-    local bill = nil
-    if nameText then
-        bill = createBillboard(adornee, nameText, color)
-    end
-
-    espCache[adornee] = { hl = hl, bill = bill }
-end
-
-local function findAdornee(obj)
-    return getAdorneeFromObject(obj)
 end
 
 task.spawn(function()
     while true do
         task.wait(espInterval)
+        if isInLobby() then
+            -- ensure no ESP while in lobby
+            if next(espCache) ~= nil then clearAllEsp() end
+            continue
+        end
+
         local seen = {}
 
-        -- Tokens
         if Toggles.EspTokens then
             local tokensFolder = Workspace:FindFirstChild("GameKeeper")
                 and Workspace.GameKeeper:FindFirstChild("Map")
                 and Workspace.GameKeeper.Map:FindFirstChild("Tokens")
             if tokensFolder then
                 for _, token in ipairs(tokensFolder:GetChildren()) do
-                    local adornee = findAdornee(token)
+                    local adornee = getAdorneeFromObject(token)
                     if adornee then
-                        addEspForAdornee(adornee, COLORS.yellow)
+                        if not espCache[adornee] then
+                            local hl = Instance.new("Highlight")
+                            hl.Name = "BF_Highlight"
+                            hl.FillColor = COLORS.yellow
+                            hl.OutlineColor = Color3.new(0,0,0)
+                            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                            hl.Parent = adornee
+                            espCache[adornee] = { hl = hl, bill = nil }
+                        end
                         seen[adornee] = true
                     end
                 end
             end
         end
 
-        -- Entities (players)
         if Toggles.EspEntities then
             for _, plr in ipairs(Players:GetPlayers()) do
                 if plr.Character then
-                    local adorn = findAdornee(plr.Character)
+                    local adorn = getAdorneeFromObject(plr.Character)
                     if adorn then
                         local team = plr.Team and plr.Team.Name or ""
                         if team == RUNNER_TEAM then
-                            addEspForAdornee(adorn, COLORS.blue, plr.Name)
+                            if not espCache[adorn] then
+                                local hl = Instance.new("Highlight")
+                                hl.FillColor = COLORS.blue
+                                hl.OutlineColor = Color3.new(0,0,0)
+                                hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                                hl.Parent = plr.Character
+                                local bill = Instance.new("BillboardGui")
+                                bill.Adornee = adorn
+                                bill.Size = UDim2.new(0,160,0,28)
+                                bill.StudsOffset = Vector3.new(0,3,0)
+                                bill.AlwaysOnTop = true
+                                local lbl = Instance.new("TextLabel", bill)
+                                lbl.Size = UDim2.new(1,0,1,0)
+                                lbl.BackgroundTransparency = 1
+                                lbl.Text = plr.Name
+                                lbl.Font = Enum.Font.GothamBold
+                                lbl.TextColor3 = COLORS.blue
+                                lbl.TextScaled = true
+                                bill.Parent = workspace
+                                espCache[adorn] = { hl = hl, bill = bill }
+                            end
                             seen[adorn] = true
                         elseif team == BANANA_TEAM then
-                            addEspForAdornee(adorn, COLORS.banana, plr.Name)
+                            if not espCache[adorn] then
+                                local hl = Instance.new("Highlight")
+                                hl.FillColor = COLORS.banana
+                                hl.OutlineColor = Color3.new(0,0,0)
+                                hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                                hl.Parent = plr.Character
+                                local bill = Instance.new("BillboardGui")
+                                bill.Adornee = adorn
+                                bill.Size = UDim2.new(0,160,0,28)
+                                bill.StudsOffset = Vector3.new(0,3,0)
+                                bill.AlwaysOnTop = true
+                                local lbl = Instance.new("TextLabel", bill)
+                                lbl.Size = UDim2.new(1,0,1,0)
+                                lbl.BackgroundTransparency = 1
+                                lbl.Text = plr.Name
+                                lbl.Font = Enum.Font.GothamBold
+                                lbl.TextColor3 = COLORS.banana
+                                lbl.TextScaled = true
+                                bill.Parent = workspace
+                                espCache[adorn] = { hl = hl, bill = bill }
+                            end
                             seen[adorn] = true
                         end
                     end
@@ -499,17 +514,36 @@ task.spawn(function()
             end
         end
 
-        -- Puzzles (workspace.GameKeeper.Puzzles)
         if Toggles.EspPuzzles then
-            local puzzleFolder = Workspace:FindFirstChild("GameKeeper") and Workspace:FindFirstChild("Puzzles") or (Workspace:FindFirstChild("GameKeeper") and Workspace.GameKeeper:FindFirstChild("Puzzles"))
+            local puzzleFolder = Workspace:FindFirstChild("GameKeeper") and Workspace.GameKeeper:FindFirstChild("Puzzles")
             if not puzzleFolder then
                 puzzleFolder = Workspace:FindFirstChild("GameKeeper") and Workspace.GameKeeper:FindFirstChild("Map") and Workspace.GameKeeper.Map:FindFirstChild("Puzzles")
             end
             if puzzleFolder then
                 for _, obj in ipairs(puzzleFolder:GetChildren()) do
-                    local adornee = findAdornee(obj)
+                    local adornee = getAdorneeFromObject(obj)
                     if adornee then
-                        addEspForAdornee(adornee, COLORS.puzzle, tostring(obj.Name))
+                        if not espCache[adornee] then
+                            local hl = Instance.new("Highlight")
+                            hl.FillColor = COLORS.puzzle
+                            hl.OutlineColor = Color3.new(0,0,0)
+                            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                            hl.Parent = adornee
+                            local bill = Instance.new("BillboardGui")
+                            bill.Adornee = adornee
+                            bill.Size = UDim2.new(0,160,0,28)
+                            bill.StudsOffset = Vector3.new(0,3,0)
+                            bill.AlwaysOnTop = true
+                            local lbl = Instance.new("TextLabel", bill)
+                            lbl.Size = UDim2.new(1,0,1,0)
+                            lbl.BackgroundTransparency = 1
+                            lbl.Text = tostring(obj.Name)
+                            lbl.Font = Enum.Font.GothamBold
+                            lbl.TextColor3 = COLORS.puzzle
+                            lbl.TextScaled = true
+                            bill.Parent = workspace
+                            espCache[adornee] = { hl = hl, bill = bill }
+                        end
                         seen[adornee] = true
                     end
                 end
@@ -519,7 +553,9 @@ task.spawn(function()
         -- cleanup entries not seen
         for adornee, _ in pairs(espCache) do
             if not seen[adornee] then
-                clearEspEntry(adornee)
+                if espCache[adornee].hl and espCache[adornee].hl.Parent then pcall(function() espCache[adornee].hl:Destroy() end) end
+                if espCache[adornee].bill and espCache[adornee].bill.Parent then pcall(function() espCache[adornee].bill:Destroy() end) end
+                espCache[adornee] = nil
             end
         end
     end
@@ -527,23 +563,15 @@ end)
 
 -- cleanup on character remove
 player.CharacterRemoving:Connect(function()
-    for k, _ in pairs(espCache) do clearEspEntry(k) end
-    espCache = {}
+    clearAllEsp()
     if myPlatform then
         myPlatform:Destroy()
         myPlatform = nil
     end
 end)
 
---========================================================
--- CLEAN UP FUNCTION (resets everything and tries to reduce lag)
--- Behavior:
---  - if SafePlace active, teleport player to savedPosition BEFORE reset
---  - when lobby entered, SafePlace is removed without teleport
---========================================================
-
+-- CLEAN UP function: if SafePlace active -> teleport back savedPosition before reset
 local function doCleanUp()
-    -- If SafePlace active and we have a savedPosition -> teleport back first
     if Toggles.SafePlace and savedPosition and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
         pcall(function()
             local hrp = player.Character.HumanoidRootPart
@@ -552,46 +580,39 @@ local function doCleanUp()
         end)
     end
 
-    -- 1) disable all toggles
+    -- disable toggles
     for k,_ in pairs(Toggles) do Toggles[k] = false end
 
-    -- 2) stop magnet: loop checks Toggles.AutoCollect so it will exit
+    -- stop magnet by letting loop see Toggles.AutoCollect == false
     task.spawn(function()
         task.wait(0.3)
         magnetTask = nil
     end)
 
-    -- 3) remove platform (already teleported back if we did above)
+    -- destroy platform
     if myPlatform then
         pcall(function() myPlatform:Destroy() end)
         myPlatform = nil
     end
 
-    -- 4) reset savedPosition / escape state / round tick
+    -- reset state
     savedPosition = nil
     isEscaping = false
     roundStartTick = 0
 
-    -- 5) clear all ESP artifacts
-    for adornee, _ in pairs(espCache) do
-        clearEspEntry(adornee)
-    end
-    espCache = {}
+    -- clear ESP
+    clearAllEsp()
 
-    -- 6) update UI buttons text to Off (minimal)
-    local function setBtnOff(btn, label)
-        if btn and btn:IsA("TextButton") then
-            btn.Text = label .. ": Off"
-        end
-    end
-    setBtnOff(btnAutoCollect, "Auto Collect Coins")
-    setBtnOff(btnSafePlace, "Safe Place")
-    setBtnOff(btnAutoEscape, "Auto Escape (<60s)")
-    setBtnOff(btnEspTokens, "Esp Tokens")
-    setBtnOff(btnEspEntities, "Esp Entities")
-    setBtnOff(btnEspPuzzles, "Esp Puzzles")
+    -- update UI text
+    local function setBtnOff(btn,label) if btn and btn:IsA("TextButton") then btn.Text = label..": Off" end end
+    setBtnOff(btnAutoCollect,"Auto Collect Coins")
+    setBtnOff(btnSafePlace,"Safe Place")
+    setBtnOff(btnAutoEscape,"Auto Escape (<60s)")
+    setBtnOff(btnEspTokens,"Esp Tokens")
+    setBtnOff(btnEspEntities,"Esp Entities")
+    setBtnOff(btnEspPuzzles,"Esp Puzzles")
 
-    -- 7) small garbage collection to reduce memory
+    -- collect garbage
     pcall(function() collectgarbage("collect") end)
 end
 
@@ -599,13 +620,12 @@ btnClean.MouseButton1Click:Connect(function()
     doCleanUp()
 end)
 
--- Bind callbacks (ensure these are the active handlers)
+-- Ensure magnet starts if user toggles On (CreateToggle calls onAutoCollectChanged)
 onAutoCollectChanged = function(state)
-    if state then startMagnet() end
-    -- when state==false the magnet loop will stop because it checks Toggles.AutoCollect
+    if state then
+        startMagnet()
+    end
 end
 
--- Show GUI
+-- show UI
 screenGui.Enabled = true
-
--- End of script
